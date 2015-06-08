@@ -1,0 +1,14 @@
+{
+  "name": "micha-ceph_collectd",
+  "version": "0.1.0",
+  "author": "micha",
+  "summary": "This collectd-plugin gathers varius data from a ceph cluster.",
+  "license": "lgpl",
+  "source": "https://github.com/noris-network/puppet-ceph_collectd",
+  "project_page": "https://github.com/noris-network/puppet-ceph_collectd",
+  "issues_url": "https://github.com/noris-network/puppet-ceph_collectd/issues",
+  "dependencies": [
+    {"name":"puppetlabs-stdlib","version_requirement":">= 1.0.0"}
+  ]
+}
+
