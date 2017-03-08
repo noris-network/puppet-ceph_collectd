@@ -1,5 +1,6 @@
 #!/usr/bin/python -u
 
+import pprint
 from time import sleep
 from socket import getfqdn
 from json import loads
@@ -8,6 +9,8 @@ import string
 from re import sub
 
 fqdn=getfqdn()
+
+pp = pprint.PrettyPrinter(indent=4)
 
 def get_pg_states(pg_data_pg_stats):
   state_stats = {
@@ -49,6 +52,7 @@ def un2zero (di,key):
 	else:
 		return 0
 
+
 while True:
 	df_data = loads(getoutput('ceph df detail --format=json 2>/dev/null'))
         pg_data = loads(getoutput('ceph pg  dump --format=json 2>/dev/null'))
@@ -56,37 +60,44 @@ while True:
 	osd_perf = loads(getoutput('ceph osd perf --format=json 2>/dev/null'))
 	po_data = loads(sub(r'-inf','0',getoutput('ceph osd pool stats --format=json 2>/dev/null')))
 	state_stats = get_pg_states(pg_data['pg_stats'])
-	iops=un2zero(st_data['pgmap'],'op_per_sec')
+	iops=un2zero(st_data['pgmap'],'write_op_per_sec')+un2zero(st_data['pgmap'],'read_op_per_sec')
 	degraded=un2zero(st_data['pgmap'],'degraded_objects')
+	osdmap=st_data['osdmap']['osdmap']
+
+	pools={}
+
+	for pg in pg_data['pg_stats']:
+		pgid=pg['pgid']
+		pool=int(pgid.split(".")[0])
+		if pools.has_key(pool):
+			pools[pool] += 1
+		else:
+			pools[pool] = 1
 
 	for pool in po_data:
-		print "PUTVAL \"" + fqdn + "/ceph/gauge-pool-" + pool['pool_name'] + "-iops\" interval=10 N:%d" % un2zero(pool['client_io_rate'],'op_per_sec')
-		print "PUTVAL \"" + fqdn + "/ceph/bytes-pool-" + pool['pool_name'] + "-rps\" interval=10 N:%d" % un2zero(pool['client_io_rate'],'read_bytes_sec')
-		print "PUTVAL \"" + fqdn + "/ceph/bytes-pool-" + pool['pool_name'] + "-wps\" interval=10 N:%d" % un2zero(pool['client_io_rate'],'write_bytes_sec')
-	for pool in df_data['pools']:
-		print "PUTVAL \"" + fqdn + "/ceph/gauge-pool-" + pool['name'] + "-objects\" interval=10 N:%d" % un2zero(pool['stats'],'objects')
-		print "PUTVAL \"" + fqdn + "/ceph/df-pool-" + pool['name'] + "\" interval=10 N:%d:%d" % (un2zero(pool['stats'],'bytes_used'),df_data['stats']['total_avail_bytes']/3)
+		iops=un2zero(pool['client_io_rate'],'read_op_per_sec') + un2zero(pool['client_io_rate'],'write_op_per_sec')
+		bw=un2zero(pool['client_io_rate'],'read_bytes_sec') + un2zero(pool['client_io_rate'],'write_bytes_sec')
+		print "PUTVAL \"" + fqdn + "/ceph/gauge-pool_" + pool['pool_name'].replace(".","_") + "_iops\" interval=10 N:%d" % iops
+		print "PUTVAL \"" + fqdn + "/ceph/gauge-pool_" + pool['pool_name'].replace(".","_") + "_bw\" interval=10 N:%d" % bw
+		print "PUTVAL \"" + fqdn + "/ceph/gauge-pool_" + pool['pool_name'].replace(".","_") + "_pgs\" interval=10 N:%d" % pools[pool['pool_id']]
 
+	for pool in df_data['pools']:
+		print "PUTVAL \"" + fqdn + "/ceph/gauge-pool_" + pool['name'].replace(".","_") + "_objects\" interval=10 N:%d" % un2zero(pool['stats'],'objects')
+		print "PUTVAL \"" + fqdn + "/ceph/df-pool_" + pool['name'].replace(".","_") + "\" interval=10 N:%d:%d" % (un2zero(pool['stats'],'bytes_used'),df_data['stats']['total_avail_bytes']/3)
+
+	print "PUTVAL \"" + fqdn + "/ceph/gauge-osds_total\" interval=10 N:%d" % osdmap['num_osds']
+	print "PUTVAL \"" + fqdn + "/ceph/gauge-osds_in\" interval=10 N:%d" % osdmap['num_in_osds']
+	print "PUTVAL \"" + fqdn + "/ceph/gauge-osds_up\" interval=10 N:%d" % osdmap['num_up_osds']
 	print "PUTVAL \"" + fqdn + "/ceph/df-total\" interval=10 N:%d:%d" % (df_data['stats']['total_used_bytes'],df_data['stats']['total_avail_bytes'])
-	print "PUTVAL \"" + fqdn + "/ceph/gauge-total-objects\" interval=10 N:%d" % df_data['stats']['total_objects']
-	print "PUTVAL \"" + fqdn + "/ceph/gauge-degraded-objects\" interval=10 N:%d" % degraded
-	print "PUTVAL \"" + fqdn + "/ceph/gauge-total-pgs\" interval=10 N:%d" % len(pg_data['pg_stats'])
-	print "PUTVAL \"" + fqdn + "/ceph/gauge-backfilling-pgs\" interval=10 N:%d" % int(state_stats['wait_backfill'] + state_stats['backfilling'])
-	print "PUTVAL \"" + fqdn + "/ceph/gauge-recovering-pgs\" interval=10 N:%d" % int(state_stats['recovery_wait'] + state_stats['recovering'])
-	print "PUTVAL \"" + fqdn + "/ceph/gauge-total-iops\" interval=10 N:%d" % iops
-	print "PUTVAL \"" + fqdn + "/ceph/bytes-recovery-bps\" interval=10 N:%d" % un2zero(st_data['pgmap'],'recovering_bytes_per_sec')
+	print "PUTVAL \"" + fqdn + "/ceph/gauge-total_objects\" interval=10 N:%d" % df_data['stats']['total_objects']
+	print "PUTVAL \"" + fqdn + "/ceph/gauge-degraded_objects\" interval=10 N:%d" % degraded
+	print "PUTVAL \"" + fqdn + "/ceph/gauge-total_pgs\" interval=10 N:%d" % len(pg_data['pg_stats'])
+	print "PUTVAL \"" + fqdn + "/ceph/gauge-backfilling_pgs\" interval=10 N:%d" % int(state_stats['wait_backfill'] + state_stats['backfilling'])
+	print "PUTVAL \"" + fqdn + "/ceph/gauge-recovering_pgs\" interval=10 N:%d" % int(state_stats['recovery_wait'] + state_stats['recovering'])
+	print "PUTVAL \"" + fqdn + "/ceph/gauge-total_iops\" interval=10 N:%d" % iops
+	print "PUTVAL \"" + fqdn + "/ceph/bytes-recovery_bps\" interval=10 N:%d" % un2zero(st_data['pgmap'],'recovering_bytes_per_sec')
 	print "PUTVAL \"" + fqdn + "/ceph/bytes-rps\" interval=10 N:%d" % un2zero(st_data['pgmap'],'read_bytes_sec')
 	print "PUTVAL \"" + fqdn + "/ceph/bytes-wps\" interval=10 N:%d" % un2zero(st_data['pgmap'],'write_bytes_sec')
-	print "PUTVAL \"" + fqdn + "/ceph/gauge-recovery-objps\" interval=10 N:%d" % un2zero(st_data['pgmap'],'recovering_objects_per_sec')
-	max_apply_latency=0
-	max_commit_latency=0
-	for osd in osd_perf['osd_perf_infos']:
-		if max_apply_latency < osd['perf_stats']['apply_latency_ms']:
-			max_apply_latency = osd['perf_stats']['apply_latency_ms']
-		if max_commit_latency < osd['perf_stats']['commit_latency_ms']:
-                        max_commit_latency = osd['perf_stats']['commit_latency_ms']
-		print "PUTVAL \"" + fqdn + "/ceph/latency-apply-%d\" interval=10 N:%d" % (osd['id'], osd['perf_stats']['apply_latency_ms'])
-		print "PUTVAL \"" + fqdn + "/ceph/latency-commit-%d\" interval=10 N:%d" % (osd['id'], osd['perf_stats']['commit_latency_ms'])
-	print "PUTVAL \"" + fqdn + "/ceph/latency-apply-max\" interval=10 N:%d" % osd['perf_stats']['apply_latency_ms']
-	print "PUTVAL \"" + fqdn + "/ceph/latency-commit-max\" interval=10 N:%d" % osd['perf_stats']['commit_latency_ms']
+	print "PUTVAL \"" + fqdn + "/ceph/gauge-recovery_objps\" interval=10 N:%d" % un2zero(st_data['pgmap'],'recovering_objects_per_sec')
+
 	sleep(10)

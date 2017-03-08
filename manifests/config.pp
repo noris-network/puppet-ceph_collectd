@@ -11,7 +11,7 @@
 # Copyright 2015 Micha Krause, unless otherwise noted.
 #
 class ceph_collectd::config {
-  collectd::plugin::exec { 'ceph':
+  collectd::plugin::exec::cmd { 'ceph-mon':
     exec  => ['/usr/local/bin/ceph_collect.py'],
     user  => $::ceph_collectd::user,
     group => $::ceph_collectd::group,
