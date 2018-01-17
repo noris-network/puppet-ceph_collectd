@@ -58,10 +58,12 @@ while True:
         pg_data = loads(getoutput('ceph pg  dump --format=json 2>/dev/null'))
 	st_data = loads(getoutput('ceph -s --format=json 2>/dev/null'))
 	osd_perf = loads(getoutput('ceph osd perf --format=json 2>/dev/null'))
+	osd_df = loads(getoutput('ceph osd df --format=json 2>/dev/null | sed "s/-nan/0/g"'))
 	po_data = loads(sub(r'-inf','0',getoutput('ceph osd pool stats --format=json 2>/dev/null')))
 	state_stats = get_pg_states(pg_data['pg_stats'])
-	iops=un2zero(st_data['pgmap'],'write_op_per_sec')+un2zero(st_data['pgmap'],'read_op_per_sec')
+	totaliops=un2zero(st_data['pgmap'],'write_op_per_sec')+un2zero(st_data['pgmap'],'read_op_per_sec')
 	degraded=un2zero(st_data['pgmap'],'degraded_objects')
+	missplaced=un2zero(st_data['pgmap'],'misplaced_objects')
 	osdmap=st_data['osdmap']['osdmap']
 
 	pools={}
@@ -73,6 +75,16 @@ while True:
 			pools[pool] += 1
 		else:
 			pools[pool] = 1
+		if "backfilling" in pg['state']:
+			for osd in pg['up']:
+				if osd not in pg['acting']:
+					print "PUTVAL \"" + fqdn + "/ceph/gauge-osd_" + str(osd) + "_backfill\" interval=10 N:%d" % osd
+		if "deep" in pg['state']:
+			for osd in pg['acting']:
+				print "PUTVAL \"" + fqdn + "/ceph/gauge-osd_" + str(osd) + "_deepscrubs\" interval=10 N:%d" % osd
+		elif "scrubbing" in pg['state']:
+                        for osd in pg['acting']:
+				print "PUTVAL \"" + fqdn + "/ceph/gauge-osd_" + str(osd) + "_scrubs\" interval=10 N:%d" % osd
 
 	for pool in po_data:
 		iops=un2zero(pool['client_io_rate'],'read_op_per_sec') + un2zero(pool['client_io_rate'],'write_op_per_sec')
@@ -91,13 +103,19 @@ while True:
 	print "PUTVAL \"" + fqdn + "/ceph/df-total\" interval=10 N:%d:%d" % (df_data['stats']['total_used_bytes'],df_data['stats']['total_avail_bytes'])
 	print "PUTVAL \"" + fqdn + "/ceph/gauge-total_objects\" interval=10 N:%d" % df_data['stats']['total_objects']
 	print "PUTVAL \"" + fqdn + "/ceph/gauge-degraded_objects\" interval=10 N:%d" % degraded
+	print "PUTVAL \"" + fqdn + "/ceph/gauge-missplaced_objects\" interval=10 N:%d" % missplaced
 	print "PUTVAL \"" + fqdn + "/ceph/gauge-total_pgs\" interval=10 N:%d" % len(pg_data['pg_stats'])
 	print "PUTVAL \"" + fqdn + "/ceph/gauge-backfilling_pgs\" interval=10 N:%d" % int(state_stats['wait_backfill'] + state_stats['backfilling'])
 	print "PUTVAL \"" + fqdn + "/ceph/gauge-recovering_pgs\" interval=10 N:%d" % int(state_stats['recovery_wait'] + state_stats['recovering'])
-	print "PUTVAL \"" + fqdn + "/ceph/gauge-total_iops\" interval=10 N:%d" % iops
+	print "PUTVAL \"" + fqdn + "/ceph/gauge-total_iops\" interval=10 N:%d" % totaliops
 	print "PUTVAL \"" + fqdn + "/ceph/bytes-recovery_bps\" interval=10 N:%d" % un2zero(st_data['pgmap'],'recovering_bytes_per_sec')
 	print "PUTVAL \"" + fqdn + "/ceph/bytes-rps\" interval=10 N:%d" % un2zero(st_data['pgmap'],'read_bytes_sec')
 	print "PUTVAL \"" + fqdn + "/ceph/bytes-wps\" interval=10 N:%d" % un2zero(st_data['pgmap'],'write_bytes_sec')
 	print "PUTVAL \"" + fqdn + "/ceph/gauge-recovery_objps\" interval=10 N:%d" % un2zero(st_data['pgmap'],'recovering_objects_per_sec')
+	disks=[]
+	for disk in osd_df['nodes']:
+		disks.append(disk['utilization'])
+	disks.sort()
+	print "PUTVAL \"" + fqdn + "/ceph/gauge-osd_df\" interval=10 N:%d" % int(disks[-1]*1000)
 
-	sleep(10)
+	sleep(4)
